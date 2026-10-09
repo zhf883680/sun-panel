@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -36,6 +38,55 @@ var hdIconsIndexCache = cache.NewGoCache[hdIconsIndexResp](time.Hour, 10*time.Mi
 
 // 文件名安全校验，防止路径穿越
 var hdIconsFileRegexp = regexp.MustCompile(`^[A-Za-z0-9_\-]+\.(png|svg|jpg|jpeg|webp|gif|ico)$`)
+
+// 在线图库本地磁盘缓存目录：source_temp_path/gallery/hdicons
+// （docker 部署时 runtime 目录是挂载卷，缓存可跨重启保留）
+func hdIconsCacheDir() string {
+	p := global.Config.GetValueString("base", "source_temp_path")
+	if p == "" {
+		p = "./runtime/temp"
+	}
+	return filepath.Join(p, "gallery", "hdicons")
+}
+
+func hdIconsImageCacheFile(style, file string) string {
+	return filepath.Join(hdIconsCacheDir(), style, file)
+}
+
+func hdIconsIndexCacheFile() string {
+	return filepath.Join(hdIconsCacheDir(), "icons.json")
+}
+
+// 按扩展名推断 Content-Type
+func contentTypeByFileName(file string) string {
+	switch strings.ToLower(path.Ext(file)) {
+	case ".svg":
+		return "image/svg+xml"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".webp":
+		return "image/webp"
+	case ".gif":
+		return "image/gif"
+	case ".ico":
+		return "image/x-icon"
+	}
+	return "application/octet-stream"
+}
+
+// 写入本地缓存（失败不影响主流程）
+func writeCacheFile(filePath string, data []byte) {
+	if err := os.MkdirAll(filepath.Dir(filePath), os.ModePerm); err != nil {
+		return
+	}
+	tmp := filePath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0666); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, filePath)
+}
 
 type hdIconRawItem struct {
 	Name string `json:"name"`
@@ -140,11 +191,24 @@ func (a *GalleryApi) HdIconsIndex(c *gin.Context) {
 	resp, err := fetchHdIconsIndex()
 	if err != nil {
 		global.Logger.Error("[gallery] fetch hdicons index error:", err.Error())
+		// 回源失败时使用本地磁盘缓存
+		if b, e := os.ReadFile(hdIconsIndexCacheFile()); e == nil && len(b) > 0 {
+			cached := hdIconsIndexResp{}
+			if e := json.Unmarshal(b, &cached); e == nil {
+				global.Logger.Info("[gallery] use local cached hdicons index")
+				hdIconsIndexCache.Set("index", cached, time.Hour)
+				apiReturn.SuccessData(c, cached)
+				return
+			}
+		}
 		apiReturn.Error(c, "Failed to fetch the online gallery index: "+err.Error())
 		return
 	}
 
 	hdIconsIndexCache.Set("index", resp, time.Hour)
+	if b, e := json.Marshal(resp); e == nil {
+		writeCacheFile(hdIconsIndexCacheFile(), b)
+	}
 	apiReturn.SuccessData(c, resp)
 }
 
@@ -155,6 +219,14 @@ func (a *GalleryApi) HdIconsImage(c *gin.Context) {
 
 	if !isSupportedHdIconsStyle(style) || !hdIconsFileRegexp.MatchString(file) {
 		c.Status(http.StatusBadRequest)
+		return
+	}
+
+	// 命中本地磁盘缓存直接返回
+	cacheFile := hdIconsImageCacheFile(style, file)
+	if b, err := os.ReadFile(cacheFile); err == nil && len(b) > 0 {
+		c.Header("Cache-Control", "public, max-age=86400")
+		c.Data(http.StatusOK, contentTypeByFileName(file), b)
 		return
 	}
 
@@ -181,13 +253,19 @@ func (a *GalleryApi) HdIconsImage(c *gin.Context) {
 
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" || strings.HasPrefix(contentType, "text/") {
-		if strings.HasSuffix(file, ".svg") {
-			contentType = "image/svg+xml"
-		} else {
-			contentType = "image/png"
-		}
+		contentType = contentTypeByFileName(file)
 	}
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil || len(body) == 0 {
+		global.Logger.Error("[gallery] read hdicons image error:", err)
+		c.Status(http.StatusNotFound)
+		return
+	}
+
+	// 落盘缓存，下次直接走本地（离线也能用）
+	writeCacheFile(cacheFile, body)
+
 	c.Header("Cache-Control", "public, max-age=86400")
-	c.DataFromReader(http.StatusOK, resp.ContentLength, contentType, resp.Body, nil)
+	c.Data(http.StatusOK, contentType, body)
 }
