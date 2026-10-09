@@ -10,3 +10,10 @@ export enum PanelPanelConfigStyleEnum {
   'info' = 0, // 详情风格
   'small' = 1, // 同icon
 }
+
+// 卡片类型
+export enum PanelItemCardTypeEnum {
+  'normal' = 1, // 普通图标
+  'docker' = 2, // docker（未实现）
+  'builtInApp' = 3, // 内置应用
+}

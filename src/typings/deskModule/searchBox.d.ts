@@ -7,4 +7,3 @@ declare namespace DeskModule.SearchBox {
     }
 
 }
-

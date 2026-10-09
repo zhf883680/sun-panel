@@ -15,7 +15,26 @@ const (
 	DISCLAIMER            = "disclaimer"            // 免责声明 储存类型：字符串
 	WEB_ABOUT_DESCRIPTION = "web_about_description" // 关于的描述信息
 	PANEL_PUBLIC_USER_ID  = "panel_public_user_id"  // 公开访问模式用户id *uint|null
+	SITE_SETTING          = "site_setting"          // 站点设置 储存类型：SiteSetting
 )
+
+// 站点设置（与 v1.8.1 前端 appStore.siteSetting 字段保持一致）
+type SiteSetting struct {
+	Title                  string `json:"title"`                  // 站点标题
+	FaviconUrl             string `json:"favicoUrl"`              // 站点图标
+	LoginBackgroundUrl     string `json:"loginBackgroundUrl"`     // 登录页背景图片
+	IsEnableLoginCaptcha   bool   `json:"isEnableLoginCaptcha"`   // 启用登录验证码
+	IsDisableItemCardCache bool   `json:"isDisableItemCardCache"` // 禁用项目卡片数据缓存
+}
+
+// 默认站点设置
+func DefaultSiteSetting() SiteSetting {
+	return SiteSetting{
+		Title:              "Sun-Panel",
+		FaviconUrl:         "",
+		LoginBackgroundUrl: "",
+	}
+}
 
 type SystemSettingCache struct {
 	Cache cache.Cacher[interface{}]

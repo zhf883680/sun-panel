@@ -13,6 +13,10 @@ declare namespace Panel {
         description?: string
         openMethod: number
         itemIconGroupId ?:number
+        onlyName?: string
+        cardType?: number
+        backgroundColor?: string
+        expandParam?: string
     }
 
     interface ItemIconGroup extends Common.InfoBase {
@@ -46,6 +50,8 @@ declare namespace Panel {
         iconTextIconHideTitle?:boolean
         logoText?:string
         logoImageSrc?:string
+        logoShow?:boolean
+        clockShow?:boolean
         clockShowSecond?:boolean
         clockColor?:string
         searchBoxShow?:boolean
@@ -56,10 +62,8 @@ declare namespace Panel {
         maxWidthUnit:string
         marginX?:number
         footerHtml?:string
-        systemMonitorShow?:boolean
-        systemMonitorShowTitle?:boolean
-        systemMonitorPublicVisitModeShow?:boolean
         netModeChangeButtonShow?:boolean
+        accountSwitcherShow?:boolean
     }
 
     interface userConfig{

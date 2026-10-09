@@ -19,3 +19,10 @@ export function getAboutDescription<T>() {
     url: '/openness/getAboutDescription',
   })
 }
+
+// 站点设置（登录页使用，无需鉴权）
+export function getSiteSetting<T>() {
+  return get<T>({
+    url: '/openness/getSiteSetting',
+  })
+}

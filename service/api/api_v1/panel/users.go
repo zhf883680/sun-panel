@@ -276,5 +276,5 @@ func (a UsersApi) GetPublicVisitUser(c *gin.Context) {
 	}
 
 	// 没有此配置
-	apiReturn.ErrorDataNotFound(c)
+	apiReturn.SuccessData(c, nil)
 }

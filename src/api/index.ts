@@ -15,6 +15,14 @@ export function logout<T>() {
   })
 }
 
+// 退出指定账号（用于多账号切换）
+export function logoutByToken<T>(token: string) {
+  return post<T>({
+    url: '/logout',
+    headers: { token },
+  })
+}
+
 export function UserUpdateInfo<T>(headImage: string, name: string) {
   return post<T>({
     url: '/user/updateInfo',

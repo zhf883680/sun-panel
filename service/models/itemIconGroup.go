@@ -12,6 +12,12 @@ type ItemIconGroup struct {
 	Sort        int    `gorm:"type:int(11)" json:"sort"`
 	UserId      uint   `json:"userId"`
 	User        User   `json:"user"`
+	// 分组卡片仅显示名称
+	OnlyName string `gorm:"type:varchar(50);default:''" json:"-"`
+	// 分组卡片公开访问时隐藏
+	PublicVisitHide bool `gorm:"default:false" json:"-"`
+	// 分组卡片样式（JSON）
+	CardStyle string `gorm:"type:text" json:"-"`
 }
 
 func (m *ItemIconGroup) DeleteByUserId(db *gorm.DB, userId uint) (err error) {

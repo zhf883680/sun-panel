@@ -42,3 +42,10 @@ func (a *Openness) GetAboutDescription(c *gin.Context) {
 		apiReturn.SuccessData(c, content)
 	}
 }
+
+// 站点设置（登录页需要，无需鉴权）
+func (a *Openness) GetSiteSetting(c *gin.Context) {
+	siteSetting := systemSetting.DefaultSiteSetting()
+	_ = global.SystemSetting.GetValueByInterface(systemSetting.SITE_SETTING, &siteSetting)
+	apiReturn.SuccessData(c, siteSetting)
+}

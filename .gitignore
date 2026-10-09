@@ -42,3 +42,6 @@ service/database
 service/web
 service/uploads
 service/plugins
+
+# 本地构建产物
+release/

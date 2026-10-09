@@ -45,6 +45,43 @@ func GetOneFaviconURL(urlStr string) (string, error) {
 	return "", fmt.Errorf("not found ico")
 }
 
+// 从网页上的link标签中获取图标的完整地址，同时返回网页标题
+// 即使图标获取失败，只要页面能访问，也会尽可能返回标题
+func GetOneFaviconURLAndTitle(urlStr string) (iconUrl string, title string, err error) {
+	doc, err := getDocument(urlStr)
+	if err != nil {
+		return "", "", err
+	}
+
+	title = strings.TrimSpace(doc.Find("title").First().Text())
+
+	iconURLs := []string{}
+	doc.Find("link").Each(func(i int, s *goquery.Selection) {
+		rel, _ := s.Attr("rel")
+		href, _ := s.Attr("href")
+
+		if strings.Contains(strings.ToLower(rel), "icon") && href != "" {
+			iconURLs = append(iconURLs, href)
+		}
+	})
+
+	if len(iconURLs) == 0 {
+		return "", title, errors.New("favicon not found on the page")
+	}
+
+	for _, v := range iconURLs {
+		// 标准的路径地址
+		if IsHTTPURL(v) {
+			return v, title, nil
+		} else {
+			urlInfo, _ := url.Parse(urlStr)
+			fullUrl := urlInfo.Scheme + "://" + urlInfo.Host + "/" + strings.TrimPrefix(v, "/")
+			return fullUrl, title, nil
+		}
+	}
+	return "", title, fmt.Errorf("not found ico")
+}
+
 // 获取远程文件的大小
 func GetRemoteFileSize(url string) (int64, error) {
 	resp, err := http.Head(url)
@@ -130,29 +167,8 @@ func GetOneFaviconURLAndUpload(urlStr string) (string, bool) {
 }
 
 func getFaviconURL(url string) ([]string, error) {
-	var icons []string
-	icons = make([]string, 0)
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return icons, err
-	}
-
-	// 设置User-Agent头字段，模拟浏览器请求
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return icons, err
-	}
-
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return icons, errors.New("HTTP request failed with status code " + strconv.Itoa(resp.StatusCode))
-	}
-
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	icons := make([]string, 0)
+	doc, err := getDocument(url)
 	if err != nil {
 		return icons, err
 	}
@@ -173,4 +189,28 @@ func getFaviconURL(url string) ([]string, error) {
 	}
 
 	return icons, nil
+}
+
+// 请求页面并解析为 goquery 文档
+func getDocument(url string) (*goquery.Document, error) {
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// 设置User-Agent头字段，模拟浏览器请求
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New("HTTP request failed with status code " + strconv.Itoa(resp.StatusCode))
+	}
+
+	return goquery.NewDocumentFromReader(resp.Body)
 }

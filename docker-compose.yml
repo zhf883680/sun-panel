@@ -2,13 +2,12 @@ version: "3.2"
 
 services:
   sun-panel:
-    image: 'hslr/sun-panel:latest'
+    build: .
+    image: zhf883680/sun-panel:1.8.1
     container_name: sun-panel
     volumes:
     - ./conf:/app/conf
-    - ./uploads:/app/uploads
-    - ./database:/app/database
-    # - ./runtime:/app/runtime
+    - ./runtime:/app/runtime
     ports:
     - 3002:3002
     restart: always

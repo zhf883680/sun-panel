@@ -4,19 +4,20 @@ FROM node AS web_image
 # 华为源
 # RUN npm config set registry https://repo.huaweicloud.com/repository/npm/
 
-RUN npm install pnpm -g
-
 WORKDIR /build
 
-COPY ./package.json /build
+# 使用 package-lock.json（已锁定 naive-ui 2.44.x：2.45+ 的 vapor 重写与 Vue 3.2 不兼容）
+COPY ./package.json ./package-lock.json /build
 
-COPY ./pnpm-lock.yaml /build
-
-RUN pnpm install
+RUN npm ci
 
 COPY . /build
 
-RUN pnpm run build
+# 前端展示用版本号（与后端 service/assets/version 保持一致）
+ARG VITE_APP_VERSION=1.8.1
+ENV VITE_APP_VERSION=${VITE_APP_VERSION}
+
+RUN npm run build
 
 # build backend
 # 最新alpine3.19导致sqlite3编译失败(https://github.com/mattn/go-sqlite3/issues/1164，

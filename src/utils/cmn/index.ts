@@ -97,6 +97,19 @@ export function setTitle(titile: string) {
   document.title = titile
 }
 
+// 应用站点设置（标题、站点图标）
+export function applySiteSetting(siteSetting?: { title?: string, favicoUrl?: string } | null) {
+  if (!siteSetting)
+    return
+  if (siteSetting.title)
+    document.title = siteSetting.title
+  if (siteSetting.favicoUrl) {
+    const link = document.querySelector('link[rel="icon"]') as HTMLLinkElement | null
+    if (link)
+      link.href = siteSetting.favicoUrl
+  }
+}
+
 export function getTitle(titile: string) {
   document.title = titile
 }

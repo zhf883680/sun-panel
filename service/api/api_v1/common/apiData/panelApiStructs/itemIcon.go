@@ -21,4 +21,5 @@ type ItemIconGetSiteFaviconReq struct {
 
 type ItemIconGetSiteFaviconResp struct {
 	IconUrl string `json:"iconUrl"`
+	Title   string `json:"title"`
 }

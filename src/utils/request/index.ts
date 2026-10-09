@@ -92,7 +92,9 @@ function http<T = any>(
   if (!headers)
     headers = {}
 
-  headers.token = authStore.token
+  // 允许调用方指定 token（多账号场景切换其它账号时使用）
+  if (!headers.token)
+    headers.token = authStore.token
   headers.lang = appStore.language
   return method === 'GET'
     ? request.get(url, { params, signal, onDownloadProgress }).then(successHandler, failHandler)

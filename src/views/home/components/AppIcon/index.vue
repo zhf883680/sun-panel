@@ -28,19 +28,22 @@ const calculateLuminance = (color: string) => {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255
 }
 
+// 卡片背景色（优先取卡片背景色，兼容旧数据取图标背景色）
+const cardBackground = computed(() => props.itemInfo?.backgroundColor || props.itemInfo?.icon?.backgroundColor || defaultBackground)
+
 const textColor = computed(() => {
-  const luminance = calculateLuminance(props.itemInfo?.icon?.backgroundColor || defaultBackground)
+  const luminance = calculateLuminance(cardBackground.value)
   return luminance > 0.5 ? 'black' : 'white'
 })
 </script>
 
 <template>
-  <div class="app-icon w-full">
+  <div class="app-icon w-full" :data-only-name="itemInfo?.onlyName || undefined">
     <!-- 详情图标 -->
     <div
       v-if="style === PanelPanelConfigStyleEnum.info"
       class="app-icon-info w-full rounded-2xl  transition-all duration-200 hover:shadow-[0_0_20px_10px_rgba(0,0,0,0.2)] flex"
-      :style="{ background: itemInfo?.icon?.backgroundColor || defaultBackground }"
+      :style="{ background: cardBackground }"
     >
       <!-- 图标 -->
       <div class="app-icon-info-icon w-[70px] h-[70px]">
@@ -73,7 +76,7 @@ const textColor = computed(() => {
         class="app-icon-small-icon overflow-hidden rounded-2xl sunpanel w-[70px] h-[70px] mx-auto rounded-2xl transition-all duration-200 hover:shadow-[0_0_20px_10px_rgba(0,0,0,0.2)]"
         :title="itemInfo?.description"
       >
-        <ItemIcon :item-icon="itemInfo?.icon" />
+        <ItemIcon :item-icon="itemInfo?.icon" :force-background="cardBackground" />
       </div>
       <div
         v-if="!iconTextIconHideTitle"

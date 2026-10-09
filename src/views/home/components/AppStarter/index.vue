@@ -49,6 +49,11 @@ const apps = ref<App[]>([
     icon: 'tabler:file-upload',
   },
   {
+    name: t('apps.globalSetting.appName'),
+    componentName: 'GlobalSetting',
+    icon: 'ri-settings-4-line',
+  },
+  {
     name: t('apps.exportImport.appName'),
     componentName: 'ImportExport',
     icon: 'icon-park-outline-import-and-export',

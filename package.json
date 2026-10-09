@@ -28,7 +28,7 @@
     "katex": "^0.16.4",
     "markdown-it": "^13.0.1",
     "moment": "^2.29.4",
-    "naive-ui": "^2.36.0",
+    "naive-ui": "2.44.1",
     "pinia": "^2.0.33",
     "vue": "^3.2.47",
     "vue-draggable-plus": "^0.2.6",
@@ -68,5 +68,13 @@
     "*.{ts,tsx,vue}": [
       "pnpm lint:fix"
     ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhf883680/sun-panel.git"
+  },
+  "homepage": "https://github.com/zhf883680/sun-panel",
+  "bugs": {
+    "url": "https://github.com/zhf883680/sun-panel/issues"
   }
 }

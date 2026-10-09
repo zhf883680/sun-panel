@@ -5,6 +5,7 @@ import { SvgIcon } from '@/components/common'
 import { useModuleConfig } from '@/store/modules'
 import { useAuthStore } from '@/store'
 import { VisitMode } from '@/enums/auth'
+import SearchBoxEdit from './Edit/index.vue'
 
 import SvgSrcBaidu from '@/assets/search_engine_svg/baidu.svg'
 import SvgSrcBing from '@/assets/search_engine_svg/bing.svg'
@@ -32,7 +33,9 @@ const authStore = useAuthStore()
 const searchTerm = ref('')
 const isFocused = ref(false)
 const searchSelectListShow = ref(false)
-const defaultSearchEngineList = ref<DeskModule.SearchBox.SearchEngine[]>([
+const editShow = ref(false)
+
+const defaultSearchEngineList: DeskModule.SearchBox.SearchEngine[] = [
   {
     iconSrc: SvgSrcGoogle,
     title: 'Google',
@@ -48,15 +51,28 @@ const defaultSearchEngineList = ref<DeskModule.SearchBox.SearchEngine[]>([
     title: 'Bing',
     url: 'https://www.bing.com/search?q=%s',
   },
-])
+]
 
 const defaultState: State = {
-  currentSearchEngine: defaultSearchEngineList.value[0],
-  searchEngineList: [] || defaultSearchEngineList,
+  currentSearchEngine: defaultSearchEngineList[0],
+  searchEngineList: [...defaultSearchEngineList],
   newWindowOpen: false,
 }
 
-const state = ref<State>({ ...defaultState })
+const state = ref<State>(JSON.parse(JSON.stringify(defaultState)))
+
+// 兼容旧数据：没有自定义引擎时使用默认引擎
+function normalizeState(data?: State | null): State {
+  if (!data || !data.searchEngineList || data.searchEngineList.length === 0) {
+    return {
+      ...JSON.parse(JSON.stringify(defaultState)),
+      ...(data || {}),
+      searchEngineList: [...defaultSearchEngineList],
+      currentSearchEngine: data?.currentSearchEngine || defaultSearchEngineList[0],
+    }
+  }
+  return data
+}
 
 const onFocus = (): void => {
   isFocused.value = true
@@ -79,8 +95,28 @@ function handleEngineUpdate(engine: DeskModule.SearchBox.SearchEngine) {
   searchSelectListShow.value = false
 }
 
+// 打开引擎管理
+function handleManageClick() {
+  if (authStore.visitMode === VisitMode.VISIT_MODE_PUBLIC)
+    return
+  searchSelectListShow.value = false
+  editShow.value = true
+}
+
+// 引擎列表变更（新增/编辑/删除/排序）
+function handleEngineListUpdate(engineList: DeskModule.SearchBox.SearchEngine[]) {
+  state.value.searchEngineList = engineList
+  const current = engineList.find(engine => engine.url === state.value.currentSearchEngine?.url
+    && engine.title === state.value.currentSearchEngine?.title)
+  state.value.currentSearchEngine = current || engineList[0] || defaultSearchEngineList[0]
+  moduleConfig.saveToCloud(moduleConfigName, state.value)
+  editShow.value = false
+}
+
 function handleSearchClick() {
-  const url = state.value.currentSearchEngine.url
+  const url = state.value.currentSearchEngine?.url
+  if (!url)
+    return
   const keyword = searchTerm
   // 如果网址中存在 %s，则直接替换为关键字
   const fullUrl = replaceOrAppendKeywordToUrl(url, keyword.value)
@@ -110,11 +146,11 @@ function handleClearSearchTerm() {
 }
 
 onMounted(() => {
-  moduleConfig.getValueByNameFromCloud<State>('deskModuleSearchBox').then(({ code, data }) => {
-    if (code === 0)
-      state.value = data || defaultState
+  moduleConfig.getValueByNameFromCloud<State>(moduleConfigName).then(({ code, data }) => {
+    if (code === 0 && data)
+      state.value = normalizeState(data)
     else
-      state.value = defaultState
+      state.value = JSON.parse(JSON.stringify(defaultState))
   })
 })
 </script>
@@ -138,22 +174,23 @@ onMounted(() => {
 
     <!-- 搜索引擎选择 -->
     <div v-if="searchSelectListShow" class="w-full mt-[10px] rounded-xl p-[10px]" :style="{ background }">
-      <div class="flex items-center">
-        <div class="flex items-center">
+      <div class="flex items-center justify-between flex-wrap gap-[6px]">
+        <div class="flex items-center flex-wrap gap-[6px]">
           <div
-            v-for="item, index in defaultSearchEngineList"
+            v-for="item, index in state.searchEngineList"
             :key="index"
             :title="item.title"
-            class="w-[40px] h-[40px] mr-[10px]  cursor-pointer bg-[#ffffff] flex items-center justify-center rounded-xl"
+            class="w-[40px] h-[40px] cursor-pointer bg-[#ffffff] flex items-center justify-center rounded-xl"
             @click="handleEngineUpdate(item)"
           >
             <NAvatar :src="item.iconSrc" style="background-color: transparent;" :size="20" />
           </div>
-        <!-- <div class="w-[40px] h-[40px] ml-[10px] flex justify-center items-center cursor-pointer" @click="handleEngineClick">
+        </div>
+
+        <div class="w-[40px] h-[40px] flex justify-center items-center cursor-pointer" :title="$t('deskModule.searchBox.engineManage')" @click="handleManageClick">
           <NAvatar style="background-color: transparent;" :size="30">
-            <SvgIcon icon="lets-icons:setting-alt-fill" style="font-size: 20px;" />
+            <SvgIcon icon="ep-setting" style="font-size: 20px;" />
           </NAvatar>
-        </div> -->
         </div>
       </div>
 
@@ -165,6 +202,8 @@ onMounted(() => {
         </NCheckbox>
       </div>
     </div>
+
+    <SearchBoxEdit v-model:visible="editShow" :engine-list="state.searchEngineList" :default-list="defaultSearchEngineList" @confirm="handleEngineListUpdate" />
   </div>
 </template>
 

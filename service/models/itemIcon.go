@@ -19,6 +19,14 @@ type ItemIcon struct {
 	ItemIconGroupId int                       `json:"itemIconGroupId"`
 	UserId          uint                      `json:"userId"`
 	User            User                      `json:"user"`
+	// 仅显示名称（不显示图标）
+	OnlyName string `gorm:"type:varchar(50);default:''" json:"onlyName"`
+	// 卡片类型 1:详情 2:小图标
+	CardType int `gorm:"type:tinyint(1);default:1" json:"cardType"`
+	// 卡片背景色
+	BackgroundColor string `gorm:"type:varchar(50);default:''" json:"backgroundColor"`
+	// 扩展参数（预留）
+	ExpandParam string `gorm:"type:text" json:"-"`
 }
 
 func (m *ItemIcon) DeleteByItemIconGroupIds(db *gorm.DB, userId uint, itemIconGroupIds []uint) (err error) {

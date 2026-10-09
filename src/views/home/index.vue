@@ -3,12 +3,13 @@ import { VueDraggable } from 'vue-draggable-plus'
 import { NBackTop, NButton, NButtonGroup, NDropdown, NModal, NSkeleton, NSpin, useDialog, useMessage } from 'naive-ui'
 import { nextTick, onMounted, ref } from 'vue'
 import { AppIcon, AppStarter, EditItem } from './components'
-import { Clock, SearchBox, SystemMonitor } from '@/components/deskModule'
+import { AccountSwitcher, Clock, SearchBox } from '@/components/deskModule'
 import { SvgIcon } from '@/components/common'
 import { deletes, getListByGroupId, saveSort } from '@/api/panel/itemIcon'
 import { getList as getGroupList } from '@/api/panel/itemIconGroup'
 
-import { setTitle, updateLocalUserInfo } from '@/utils/cmn'
+import { applySiteSetting, copyToClipboard, setTitle, updateLocalUserInfo } from '@/utils/cmn'
+import { getSiteSetting } from '@/api/openness'
 import { useAuthStore, usePanelState } from '@/store'
 import { PanelPanelConfigStyleEnum, PanelStateNetworkModeEnum } from '@/enums'
 import { VisitMode } from '@/enums/auth'
@@ -113,48 +114,55 @@ function updateItemIconGroupByNet(itemIconGroupIndex: number, itemIconGroupId: n
 
 function handleRightMenuSelect(key: string | number) {
   dropdownShow.value = false
-  // console.log(currentRightSelectItem, key)
-  let jumpUrl = panelState.networkMode === PanelStateNetworkModeEnum.lan ? currentRightSelectItem.value?.lanUrl : currentRightSelectItem.value?.url
-  if (currentRightSelectItem.value?.lanUrl === '')
-    jumpUrl = currentRightSelectItem.value.url
-  switch (key) {
-    case 'newWindows':
-      window.open(jumpUrl)
-      break
-    case 'openWanUrl':
-      if (currentRightSelectItem.value)
-        openPage(currentRightSelectItem.value?.openMethod, currentRightSelectItem.value?.url, currentRightSelectItem.value?.title)
-      break
-    case 'openLanUrl':
-      if (currentRightSelectItem.value && currentRightSelectItem.value.lanUrl)
-        openPage(currentRightSelectItem.value?.openMethod, currentRightSelectItem.value.lanUrl, currentRightSelectItem.value?.title)
-      break
-    case 'edit':
-      // 这里有个奇怪的问题，如果不使用{...}的方式 父组件的值会同步修改 标记一下
-      handleEditItem({ ...currentRightSelectItem.value } as Panel.ItemInfo)
-      break
-    case 'delete':
-      dialog.warning({
-        title: t('common.warning'),
-        content: t('common.deleteConfirmByName', { name: currentRightSelectItem.value?.title }),
-        positiveText: t('common.confirm'),
-        negativeText: t('common.cancel'),
-        onPositiveClick: () => {
-          deletes([currentRightSelectItem.value?.id as number]).then(({ code, msg }) => {
-            if (code === 0) {
-              ms.success(t('common.deleteSuccess'))
-              getList()
-            }
-            else {
-              ms.error(`${t('common.deleteFail')}:${msg}`)
-            }
-          })
-        },
-      })
+  const item = currentRightSelectItem.value
+  if (!item)
+    return
 
-      break
-    default:
-      break
+  const keyStr = String(key)
+
+  if (keyStr === 'edit') {
+    // 这里有个奇怪的问题，如果不使用{...}的方式 父组件的值会同步修改 标记一下
+    handleEditItem({ ...item } as Panel.ItemInfo)
+    return
+  }
+
+  if (keyStr === 'delete') {
+    dialog.warning({
+      title: t('common.warning'),
+      content: t('common.deleteConfirmByName', { name: item.title }),
+      positiveText: t('common.confirm'),
+      negativeText: t('common.cancel'),
+      onPositiveClick: () => {
+        deletes([item.id as number]).then(({ code, msg }) => {
+          if (code === 0) {
+            ms.success(t('common.deleteSuccess'))
+            getList()
+          }
+          else {
+            ms.error(`${t('common.deleteFail')}:${msg}`)
+          }
+        })
+      },
+    })
+    return
+  }
+
+  // 打开地址：open-<地址字段>-<打开方式>；复制地址：copy-<地址字段>
+  const [action, addressKey, method] = keyStr.split('-')
+  const url = (item as any)[addressKey] as string
+  if (!url)
+    return
+
+  if (action === 'open') {
+    openPage(Number(method), url, item.title)
+  }
+  else if (action === 'copy') {
+    copyToClipboard(url).then((res) => {
+      if (res)
+        ms.success(t('common.copySuccess'))
+      else
+        ms.error(t('common.copyFail'))
+    })
   }
 }
 
@@ -220,42 +228,60 @@ function handleSaveSort(itemGroup: ItemGroup) {
 }
 
 function getDropdownMenuOptions() {
-  const dropdownMenuOptions = [
-    {
-      label: t('iconItem.newWindowOpen'),
-      key: 'newWindows',
-    },
+  const item = currentRightSelectItem.value
+  const dropdownMenuOptions: any[] = []
 
-  ]
+  if (!item)
+    return dropdownMenuOptions
 
-  if (currentRightSelectItem.value?.lanUrl && panelState.networkMode === PanelStateNetworkModeEnum.wan) {
+  // 列出卡片填写的所有地址（默认地址/内网地址）
+  const addressList: { key: string, label: string }[] = []
+  if (item.url)
+    addressList.push({ key: 'url', label: t('panelHome.defaultAddress') })
+  if (item.lanUrl)
+    addressList.push({ key: 'lanUrl', label: t('panelHome.lanAddress') })
+
+  if (addressList.length === 0) {
     dropdownMenuOptions.push({
-      label: t('panelHome.openLanUrl'),
-      key: 'openLanUrl',
+      label: t('panelHome.noAddress'),
+      key: 'noAddress',
+      disabled: true,
     })
   }
 
-  if (currentRightSelectItem.value?.lanUrl && panelState.networkMode === PanelStateNetworkModeEnum.lan) {
+  for (const address of addressList) {
     dropdownMenuOptions.push({
-      label: t('panelHome.openWanUrl'),
-      key: 'openWanUrl',
+      label: address.label,
+      key: address.key,
+      children: [
+        { label: t('panelHome.openInNewWindow'), key: `open-${address.key}-2` },
+        { label: t('panelHome.openInWindow'), key: `open-${address.key}-3` },
+        { label: t('panelHome.openInCurrentPage'), key: `open-${address.key}-1` },
+        { type: 'divider', key: `divider-${address.key}` },
+        { label: t('panelHome.copyAddress'), key: `copy-${address.key}` },
+      ],
     })
   }
 
   if (authStore.visitMode === VisitMode.VISIT_MODE_LOGIN) {
-    dropdownMenuOptions.push({
-      label: t('common.edit'),
-      key: 'edit',
-    }, {
-      label: t('common.delete'),
-      key: 'delete',
-    })
+    dropdownMenuOptions.push({ type: 'divider', key: 'divider-action' })
+    dropdownMenuOptions.push({ label: t('common.edit'), key: 'edit' })
+    dropdownMenuOptions.push({ label: t('common.delete'), key: 'delete' })
   }
 
   return dropdownMenuOptions
 }
 
 onMounted(() => {
+  // 站点设置（标题、图标）
+  getSiteSetting<{ title: string, favicoUrl: string }>().then(({ code, data }) => {
+    if (code === 0) {
+      applySiteSetting(data)
+      if (data?.title)
+        panelState.panelConfig.logoText = data.title
+    }
+  }).catch(() => {})
+
   // 更新用户信息
   updateLocalUserInfo()
   getList()
@@ -345,15 +371,21 @@ function handleAddItem(itemIconGroupId?: number) {
         <!-- 头 -->
         <div class="mx-[auto] w-[80%]">
           <div class="flex mx-[auto] items-center justify-center text-white">
-            <div class="logo">
-              <span class="text-2xl md:text-6xl font-bold text-shadow">
+            <div v-if="panelState.panelConfig.logoShow !== false" class="logo">
+              <div v-if="panelState.panelConfig.logoImageSrc" class="flex items-center">
+                <img :src="panelState.panelConfig.logoImageSrc" class="max-h-[60px] max-w-[300px]" alt="logo">
+              </div>
+              <span v-else class="text-2xl md:text-6xl font-bold text-shadow">
                 {{ panelState.panelConfig.logoText }}
               </span>
             </div>
-            <div class="divider text-base lg:text-2xl mx-[10px]">
+            <div
+              v-if="panelState.panelConfig.logoShow !== false && panelState.panelConfig.clockShow !== false"
+              class="divider text-base lg:text-2xl mx-[10px]"
+            >
               |
             </div>
-            <div class="text-shadow">
+            <div v-if="panelState.panelConfig.clockShow !== false" class="text-shadow">
               <Clock :hide-second="!panelState.panelConfig.clockShowSecond" />
             </div>
           </div>
@@ -364,19 +396,6 @@ function handleAddItem(itemIconGroupId?: number) {
 
         <!-- 应用盒子 -->
         <div :style="{ marginLeft: `${panelState.panelConfig.marginX}px`, marginRight: `${panelState.panelConfig.marginX}px` }">
-          <!-- 系统监控状态 -->
-          <div
-            v-if="panelState.panelConfig.systemMonitorShow
-              && ((panelState.panelConfig.systemMonitorPublicVisitModeShow && authStore.visitMode === VisitMode.VISIT_MODE_PUBLIC)
-                || authStore.visitMode === VisitMode.VISIT_MODE_LOGIN)"
-            class="flex mx-auto"
-          >
-            <SystemMonitor
-              :allow-edit="authStore.visitMode === VisitMode.VISIT_MODE_LOGIN"
-              :show-title="panelState.panelConfig.systemMonitorShowTitle"
-            />
-          </div>
-
           <!-- 组纵向排列 -->
           <div
             v-for="(itemGroup, itemGroupIndex) in filterItems" :key="itemGroupIndex"
@@ -523,6 +542,8 @@ function handleAddItem(itemIconGroupId?: number) {
             <SvgIcon class="text-white font-xl" icon="mdi:wan" />
           </template>
         </NButton>
+
+        <AccountSwitcher v-if="authStore.visitMode === VisitMode.VISIT_MODE_LOGIN && panelState.panelConfig.accountSwitcherShow" />
 
         <NButton v-if="authStore.visitMode === VisitMode.VISIT_MODE_LOGIN" color="#2a2a2a6b" @click="settingModalShow = !settingModalShow">
           <template #icon>

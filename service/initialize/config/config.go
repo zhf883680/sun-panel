@@ -10,12 +10,14 @@ import (
 func getDefaultConfig() map[string]map[string]string {
 	return map[string]map[string]string{
 		"base": {
-			"http_port":        "9090",
-			"source_path":      "./files",      // 存放文件的路径
-			"source_temp_path": "./files/temp", // 存放文件的缓存路径
+			"http_port":         "3002",
+			"source_path":       "./conf/uploads", // 存放文件的路径
+			"source_temp_path":  "./runtime/temp", // 存放文件的缓存路径
+			"web_path":          "./web",          // 前端文件路径
+			"custom_style_path": "./conf/custom",  // 自定义css/js路径
 		},
 		"sqlite": {
-			"file_path": "./database.db",
+			"file_path": "./conf/database/database.db",
 		},
 	}
 

@@ -20,8 +20,9 @@ func (a *UserConfig) Get(c *gin.Context) {
 	cfg := models.UserConfig{}
 	if err := global.Db.First(&cfg, "user_id=?", userInfo.ID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			apiReturn.ErrorDataNotFound(c)
-			return
+			// 未设置过则返回默认配置
+			cfg.UserId = userInfo.ID
+			cfg.PanelJson = models.DefaultPanelJson
 		} else {
 			apiReturn.ErrorDatabase(c, err.Error())
 			return

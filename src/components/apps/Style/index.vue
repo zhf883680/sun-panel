@@ -11,6 +11,7 @@ const authStore = useAuthStore()
 const panelState = usePanelState()
 const ms = useMessage()
 const showWallpaperInput = ref(false)
+const showLogoImageInput = ref(false)
 
 const isSaveing = ref(false)
 
@@ -82,12 +83,25 @@ function resetPanelConfig() {
         LOGO
       </div>
 
-      <div>
+      <div class="flex items-center mt-[5px]">
+        <span class="mr-[10px]">{{ $t('common.show') }}</span>
+        <NSwitch v-model:value="panelState.panelConfig.logoShow" />
+      </div>
+
+      <div v-if="panelState.panelConfig.logoShow" class="mt-[5px]">
         <div>
           {{ $t('apps.baseSettings.textContent') }}
         </div>
         <div class="flex items-center mt-[5px]">
           <NInput v-model:value="panelState.panelConfig.logoText" type="text" show-count :maxlength="20" placeholder="请输入文字" />
+        </div>
+
+        <div class="flex items-center mt-[5px]">
+          <span class="mr-[10px]">{{ $t('apps.baseSettings.customImageAddress') }}</span>
+          <NSwitch v-model:value="showLogoImageInput" />
+        </div>
+        <div v-if="showLogoImageInput" class="mt-1">
+          <NInput v-model:value="panelState.panelConfig.logoImageSrc" type="text" size="small" clearable />
         </div>
       </div>
     </NCard>
@@ -97,6 +111,10 @@ function resetPanelConfig() {
         {{ $t('apps.baseSettings.clock') }}
       </div>
       <div class="flex items-center mt-[5px]">
+        <span class="mr-[10px]">{{ $t('common.show') }}</span>
+        <NSwitch v-model:value="panelState.panelConfig.clockShow" />
+      </div>
+      <div v-if="panelState.panelConfig.clockShow" class="flex items-center mt-[5px]">
         <span class="mr-[10px]">{{ $t('apps.baseSettings.clockSecondShow') }}</span>
         <NSwitch v-model:value="panelState.panelConfig.clockShowSecond" />
       </div>
@@ -113,24 +131,6 @@ function resetPanelConfig() {
       <div v-if="panelState.panelConfig.searchBoxShow" class="flex items-center mt-[5px]">
         <span class="mr-[10px]">{{ $t('apps.baseSettings.searchBarSearchItem') }}</span>
         <NSwitch v-model:value="panelState.panelConfig.searchBoxSearchIcon" />
-      </div>
-    </NCard>
-
-    <NCard style="border-radius:10px" class="mt-[10px]" size="small">
-      <div class="text-slate-500 mb-[5px] font-bold">
-        {{ $t('apps.baseSettings.systemMonitorStatus') }}
-      </div>
-      <div class="flex items-center mt-[5px]">
-        <span class="mr-[10px]">{{ $t('common.show') }}</span>
-        <NSwitch v-model:value="panelState.panelConfig.systemMonitorShow" />
-      </div>
-      <div v-if="panelState.panelConfig.systemMonitorShow" class="flex items-center mt-[5px]">
-        <span class="mr-[10px]">{{ $t('apps.baseSettings.showTitle') }}</span>
-        <NSwitch v-model:value="panelState.panelConfig.systemMonitorShowTitle" />
-      </div>
-      <div v-if="panelState.panelConfig.systemMonitorShow" class="flex items-center mt-[5px]">
-        <span class="mr-[10px]">{{ $t('apps.baseSettings.publicVisitModeShow') }}</span>
-        <NSwitch v-model:value="panelState.panelConfig.systemMonitorPublicVisitModeShow" />
       </div>
     </NCard>
 
@@ -241,6 +241,13 @@ function resetPanelConfig() {
           <div class="flex items-center mt-[5px]">
             <span class="mr-[10px]">{{ $t('apps.baseSettings.netModeChangeButtonShow') }}</span>
             <NSwitch v-model:value="panelState.panelConfig.netModeChangeButtonShow" />
+          </div>
+        </NGridItem>
+
+        <NGridItem span="12 400:12">
+          <div class="flex items-center mt-[10px]">
+            <span class="mr-[10px]">{{ $t('apps.baseSettings.accountSwitcher') }}</span>
+            <NSwitch v-model:value="panelState.panelConfig.accountSwitcherShow" />
           </div>
         </NGridItem>
 

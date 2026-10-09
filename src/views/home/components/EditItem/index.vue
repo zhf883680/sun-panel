@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { computed, defineEmits, defineProps, ref, watch } from 'vue'
 import type { FormInst, FormRules } from 'naive-ui'
-import { NButton, NForm, NFormItem, NGrid, NGridItem, NInput, NInputGroup, NModal, NSelect, useMessage } from 'naive-ui'
+import { NButton, NCollapse, NCollapseItem, NColorPicker, NForm, NFormItem, NGrid, NGridItem, NInput, NInputGroup, NModal, NSelect, useMessage } from 'naive-ui'
 import IconEditor from './IconEditor.vue'
+import AppIcon from '../AppIcon/index.vue'
 import { edit, getSiteFavicon } from '@/api/panel/itemIcon'
 import { getList as getGroupList } from '@/api/panel/itemIconGroup'
+import { defautSwatchesBackground } from '@/utils/defaultData'
+import { usePanelState } from '@/store'
+import { PanelItemCardTypeEnum } from '@/enums'
 import { t } from '@/locales'
 
 interface Props {
@@ -16,12 +20,16 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<Emit>()
 const ms = useMessage()
+const panelState = usePanelState()
 const submitLoading = ref(false)
 const getIconLoading = ref([false, false])
+const showMoreOptions = ref<string[]>([])
 const itemIconGroupOptions = ref<{
   label: string
   value: number
 }[]>([])
+
+const defaultCardBackground = '#2a2a2a6b'
 
 const restoreDefault: Panel.Info = {
   icon: null,
@@ -30,6 +38,9 @@ const restoreDefault: Panel.Info = {
   lanUrl: '',
   description: '',
   openMethod: 2,
+  backgroundColor: defaultCardBackground,
+  cardType: PanelItemCardTypeEnum.normal,
+  onlyName: '',
 }
 
 interface Emit {
@@ -52,11 +63,6 @@ const rules: FormRules = {
     type: 'string',
     message: t('form.required'),
   },
-  // itemIconGroupId: {
-  //   required: true,
-  //   trigger: ['blur', 'change'],
-  //   message: t('form.required'),
-  // },
 }
 
 const options = [
@@ -72,6 +78,18 @@ const options = [
   {
     label: t('iconItem.currentPageLayerOpen'),
     value: 3,
+  },
+]
+
+// 卡片类型（v1.7+）
+const cardTypeOptions = [
+  {
+    label: t('iconItem.ordinaryIcon'),
+    value: PanelItemCardTypeEnum.normal,
+  },
+  {
+    label: t('iconItem.builtInApp'),
+    value: PanelItemCardTypeEnum.builtInApp,
   },
 ]
 
@@ -93,6 +111,10 @@ async function editApi() {
 
       emit('done', data)
     }
+    else if (code === -2) {
+      // 唯一标识已被占用
+      ms.error(`${t('common.saveFail')}: ${t('iconItem.onlyNameExisted')}`)
+    }
     else {
       ms.error(`${t('common.saveFail')}:${msg}`)
     }
@@ -111,15 +133,27 @@ const handleValidateButtonClick = (e: MouseEvent) => {
   })
 }
 
+function handleResetBackgroundColor() {
+  model.value.backgroundColor = defaultCardBackground
+}
+
 async function getIconByUrl(url: string, loadingIndex: number) {
   getIconLoading.value[loadingIndex] = true
   try {
-    const { code, data } = await getSiteFavicon<{ iconUrl: string }>(url)
+    const { code, data } = await getSiteFavicon<{ iconUrl: string, title?: string }>(url)
     if (code === 0) {
       model.value.icon = {
         itemType: 2,
         src: data.iconUrl,
       }
+      // 同步填充网站标题
+      if (data.title)
+        model.value.title = data.title.slice(0, 20)
+    }
+    else if (data && data.title) {
+      // 图标获取失败，但拿到了标题
+      model.value.title = data.title.slice(0, 20)
+      ms.warning(t('iconItem.getIconTitleOnly'))
     }
     else {
       ms.error(t('iconItem.geticonFail'))
@@ -134,6 +168,10 @@ async function getIconByUrl(url: string, loadingIndex: number) {
 watch(() => props.visible, (newValue) => {
   if (newValue === true) {
     model.value = props.itemInfo ? { ...props.itemInfo } : { ...restoreDefault }
+    if (!model.value.backgroundColor)
+      model.value.backgroundColor = defaultCardBackground
+    if (!model.value.cardType)
+      model.value.cardType = PanelItemCardTypeEnum.normal
     if (props.itemGroupId)
       model.value.itemIconGroupId = props.itemGroupId
   }
@@ -167,27 +205,26 @@ function getGroupListOptions() {
 </script>
 
 <template>
-  <NModal v-model:show="show" preset="card" size="small" style="width: 600px;border-radius: 1rem;" :title="itemInfo ? t('iconItem.edit') : t('iconItem.add')">
-    <div class="h-[600px] overflow-auto p-[5px]">
+  <NModal v-model:show="show" preset="card" size="small" style="width: 620px;border-radius: 1rem;" :title="itemInfo ? t('iconItem.edit') : t('iconItem.add')">
+    <div class="max-h-[600px] overflow-auto p-[5px]">
       <NForm ref="formRef" :model="model" :rules="rules">
         <NGrid cols="2" :x-gap="10" item-responsive>
-          <NGridItem span="2 500:1">
-            <NFormItem path="itemIconGroupId" :label="t('iconItem.iconGroup')">
-              <NSelect v-model:value="model.itemIconGroupId" :options="itemIconGroupOptions" />
-            </NFormItem>
-          </NGridItem>
           <NGridItem span="2 500:1">
             <NFormItem path="title" :label="$t('common.title')">
               <NInput v-model:value="model.title" type="text" show-count :maxlength="20" />
             </NFormItem>
           </NGridItem>
+          <NGridItem span="2 500:1">
+            <NFormItem path="openMethod" :label="t('iconItem.openMethod')">
+              <NSelect v-model:value="model.openMethod" :options="options" />
+            </NFormItem>
+          </NGridItem>
         </NGrid>
 
         <NFormItem path="icon" :label="$t('common.icon')">
-          <IconEditor v-model:item-icon="model.icon" />
+          <IconEditor v-model:item-icon="model.icon" :card-background="model.backgroundColor || defaultCardBackground" />
         </NFormItem>
-        <NFormItem path="url" :label="$t('iconItem.url')">
-          <!-- <NSelect :style="{ width: '100px' }" :options="urlProtocolOptions" /> -->
+        <NFormItem path="url" :label="t('iconItem.url')">
           <NInputGroup>
             <NInput v-model:value="model.url" type="text" :maxlength="1000" placeholder="http(s)://" />
             <NButton :disabled="!model.url" :loading="getIconLoading[0]" @click="getIconByUrl(model.url, 0)">
@@ -195,7 +232,7 @@ function getGroupListOptions() {
             </NButton>
           </NInputGroup>
         </NFormItem>
-        <NFormItem path="lanUrl" :label="$t('iconItem.lanUrl')">
+        <NFormItem path="lanUrl" :label="t('iconItem.lanUrl')">
           <NInputGroup>
             <NInput v-model:value="model.lanUrl" type="text" :maxlength="1000" :placeholder="$t('iconItem.lanUrlInputPlaceholder')" />
             <NButton :disabled="!model.lanUrl" :loading="getIconLoading[1]" @click="getIconByUrl(model.lanUrl || '', 1)">
@@ -206,9 +243,98 @@ function getGroupListOptions() {
         <NFormItem path="description" :label="$t('common.description')">
           <NInput v-model:value="model.description" type="text" show-count :maxlength="100" />
         </NFormItem>
-        <NFormItem path="openMethod" :label="$t('iconItem.openMethod')">
-          <NSelect v-model:value="model.openMethod" :options="options" />
-        </NFormItem>
+
+        <!-- 更多选项 -->
+        <div class="mt-[10px]">
+          <NCollapse v-model:expanded-names="showMoreOptions">
+            <NCollapseItem name="more">
+              <template #header>
+                <span class="font-bold">{{ t('iconItem.moreOptions') }}</span>
+                <span class="ml-1 text-xs opacity-60">
+                  ({{ t('iconItem.cardBackground') }} , {{ t('iconItem.iconGroup') }} , {{ t('iconItem.cardType') }} , {{ t('common.onlyName') }})
+                </span>
+              </template>
+
+              <NFormItem :label="t('iconItem.cardBackground')">
+                <div class="w-full">
+                  <div class="flex items-center gap-[10px] flex-wrap">
+                    <div class="card-bg-color-picker">
+                      <NColorPicker
+                        v-model:value="model.backgroundColor"
+                        size="small"
+                        style="width: 100%;"
+                        :modes="['hex']"
+                        :show-alpha="true"
+                        :swatches="defautSwatchesBackground"
+                      />
+                    </div>
+                    <NButton
+                      v-if="model.backgroundColor !== defaultCardBackground"
+                      quaternary type="info" size="tiny"
+                      @click="handleResetBackgroundColor"
+                    >
+                      {{ t('iconItem.resetBackground') }}
+                    </NButton>
+                  </div>
+                </div>
+              </NFormItem>
+
+              <NGrid cols="2" :x-gap="10" item-responsive>
+                <NGridItem span="2 500:1">
+                  <NFormItem path="itemIconGroupId" :label="t('iconItem.iconGroup')">
+                    <NSelect v-model:value="model.itemIconGroupId" :options="itemIconGroupOptions" size="small" />
+                  </NFormItem>
+                </NGridItem>
+
+                <NGridItem span="2 500:1">
+                  <NFormItem :label="t('iconItem.cardType')">
+                    <NSelect v-model:value="model.cardType" :options="cardTypeOptions" size="small" />
+                  </NFormItem>
+                </NGridItem>
+              </NGrid>
+
+              <NFormItem path="onlyName">
+                <template #label>
+                  <div class="flex items-center">
+                    <span>{{ t('common.onlyName') }}</span>
+                    <span class="ml-1 text-xs opacity-60 cursor-help" :title="t('iconItem.onlyNameTip')">?</span>
+                  </div>
+                </template>
+                <NInput
+                  v-model:value="model.onlyName" type="text" show-count :maxlength="20"
+                  :placeholder="t('iconItem.onlyNameTip')"
+                />
+              </NFormItem>
+
+              <!-- 效果预览 -->
+              <div class="mb-[10px]">
+                <div class="text-xs text-slate-400 mb-[5px]">
+                  {{ t('iconItem.preview') }}
+                </div>
+                <div class="flex items-center">
+                  <div class="w-[220px]">
+                    <AppIcon
+                      :item-info="model"
+                      :icon-text-color="panelState.panelConfig.iconTextColor"
+                      :icon-text-info-hide-description="panelState.panelConfig.iconTextInfoHideDescription || false"
+                      :icon-text-icon-hide-title="panelState.panelConfig.iconTextIconHideTitle || false"
+                      :style="0"
+                    />
+                  </div>
+                  <div class="w-[90px] ml-[10px]">
+                    <AppIcon
+                      :item-info="model"
+                      :icon-text-color="panelState.panelConfig.iconTextColor"
+                      :icon-text-info-hide-description="!panelState.panelConfig.iconTextInfoHideDescription"
+                      :icon-text-icon-hide-title="panelState.panelConfig.iconTextIconHideTitle || false"
+                      :style="1"
+                    />
+                  </div>
+                </div>
+              </div>
+            </NCollapseItem>
+          </NCollapse>
+        </div>
       </NForm>
     </div>
 
@@ -219,3 +345,10 @@ function getGroupListOptions() {
     </template>
   </NModal>
 </template>
+
+<style scoped>
+.card-bg-color-picker {
+  width: 220px;
+  min-width: 220px;
+}
+</style>

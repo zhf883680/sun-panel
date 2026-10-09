@@ -47,9 +47,26 @@ func (a *ItemIcon) Edit(c *gin.Context) {
 		req.IconJson = string(j)
 	}
 
+	// 唯一标识（onlyName）在同一用户下不允许重复
+	if req.OnlyName != "" {
+		var sameNameCount int64
+		query := global.Db.Model(&models.ItemIcon{}).Where("user_id=? AND only_name=?", userInfo.ID, req.OnlyName)
+		if req.ID != 0 {
+			query = query.Where("id<>?", req.ID)
+		}
+		if err := query.Count(&sameNameCount).Error; err != nil {
+			apiReturn.ErrorDatabase(c, err.Error())
+			return
+		}
+		if sameNameCount > 0 {
+			apiReturn.ErrorCode(c, -2, "The only name is already taken", nil)
+			return
+		}
+	}
+
 	if req.ID != 0 {
 		// 修改
-		updateField := []string{"IconJson", "Icon", "Title", "Url", "LanUrl", "Description", "OpenMethod", "GroupId", "UserId", "ItemIconGroupId"}
+		updateField := []string{"IconJson", "Icon", "Title", "Url", "LanUrl", "Description", "OpenMethod", "GroupId", "UserId", "ItemIconGroupId", "OnlyName", "CardType", "BackgroundColor", "ExpandParam"}
 		if req.Sort != 0 {
 			updateField = append(updateField, "Sort")
 		}
@@ -58,6 +75,9 @@ func (a *ItemIcon) Edit(c *gin.Context) {
 			Where("id=?", req.ID).Updates(&req)
 	} else {
 		req.Sort = 9999
+		if req.CardType == 0 {
+			req.CardType = 1
+		}
 		// 创建
 		global.Db.Create(&req)
 	}
@@ -85,6 +105,9 @@ func (a *ItemIcon) AddMultiple(c *gin.Context) {
 		// json转字符串
 		if j, err := json.Marshal(req[i].Icon); err == nil {
 			req[i].IconJson = string(j)
+		}
+		if req[i].CardType == 0 {
+			req[i].CardType = 1
 		}
 	}
 
@@ -206,16 +229,19 @@ func (a *ItemIcon) GetSiteFavicon(c *gin.Context) {
 	}
 	resp := panelApiStructs.ItemIconGetSiteFaviconResp{}
 	fullUrl := ""
-	if iconUrl, err := siteFavicon.GetOneFaviconURL(req.Url); err != nil {
-		apiReturn.Error(c, "acquisition failed: get ico error:"+err.Error())
-		return
-	} else {
-		fullUrl = iconUrl
-	}
+	iconUrl, title, faviconErr := siteFavicon.GetOneFaviconURLAndTitle(req.Url)
+	resp.Title = title
+	fullUrl = iconUrl
 
 	parsedURL, err := url.Parse(req.Url)
 	if err != nil {
-		apiReturn.Error(c, "acquisition failed:"+err.Error())
+		apiReturn.ErrorCode(c, -1, "acquisition failed:"+err.Error(), resp)
+		return
+	}
+
+	if faviconErr != nil {
+		// 图标获取失败，但可能已经拿到了标题
+		apiReturn.ErrorCode(c, -1, "acquisition failed: get ico error:"+faviconErr.Error(), resp)
 		return
 	}
 
@@ -235,7 +261,7 @@ func (a *ItemIcon) GetSiteFavicon(c *gin.Context) {
 	{
 		parsedIcoURL, err := url.Parse(fullUrl)
 		if err != nil {
-			apiReturn.Error(c, "acquisition failed: parsed ico URL :"+err.Error())
+			apiReturn.ErrorCode(c, -1, "acquisition failed: parsed ico URL :"+err.Error(), resp)
 			return
 		}
 		fullUrl = parsedIcoURL.Scheme + "://" + parsedIcoURL.Host + parsedIcoURL.Path
@@ -255,15 +281,21 @@ func (a *ItemIcon) GetSiteFavicon(c *gin.Context) {
 	{
 		var err error
 		if imgInfo, err = siteFavicon.DownloadImage(fullUrl, savePath, 1024*1024); err != nil {
-			apiReturn.Error(c, "acquisition failed: download"+err.Error())
+			apiReturn.ErrorCode(c, -1, "acquisition failed: download"+err.Error(), resp)
 			return
 		}
+	}
+
+	// 文件大小
+	var fileSize int64
+	if fileStat, err := imgInfo.Stat(); err == nil {
+		fileSize = fileStat.Size()
 	}
 
 	// 保存到数据库
 	ext := path.Ext(fullUrl)
 	mFile := models.File{}
-	if _, err := mFile.AddFile(userInfo.ID, parsedURL.Host, ext, imgInfo.Name()); err != nil {
+	if _, err := mFile.AddFile(userInfo.ID, parsedURL.Host, ext, imgInfo.Name(), fileSize, "icon"); err != nil {
 		apiReturn.ErrorDatabase(c, err.Error())
 		return
 	}

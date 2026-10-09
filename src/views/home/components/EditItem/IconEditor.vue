@@ -1,30 +1,23 @@
 <script setup lang="ts">
-import { NButton, NColorPicker, NInput, NRadio, NUpload } from 'naive-ui'
+import { NButton, NInput, NRadio, NSpace, NUpload } from 'naive-ui'
 import type { UploadFileInfo } from 'naive-ui'
-import { computed, defineProps } from 'vue'
-import { ItemIcon } from '@/components/common'
+import { computed, defineProps, ref } from 'vue'
+import { GallerySelector, ItemIcon } from '@/components/common'
 import { useAuthStore } from '@/store'
 import { apiRespErrMsg } from '@/utils/request/apiMessage'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   itemIcon: Panel.ItemIcon | null
-}>()
+  // 卡片背景色：预览时直接套用，避免与“卡片背景色”配置出现两个入口
+  cardBackground?: string
+}>(), {
+  cardBackground: '#2a2a2a6b',
+})
 const emit = defineEmits<{
   (e: 'update:itemIcon', visible: Panel.ItemIcon): void // 定义修改父组件（prop内）的值的事件
 }>()
 const authStore = useAuthStore()
-
-// 默认图标背景色
-const defautSwatchesBackground = [
-  '#00000000',
-  '#000000',
-  '#ffffff',
-  '#18A058',
-  '#2080F0',
-  '#F0A020',
-  'rgba(208, 48, 80, 1)',
-  '#C418D1FF',
-]
+const showGallery = ref(false)
 
 const initData: Panel.ItemIcon = {
   itemType: 2,
@@ -55,8 +48,9 @@ function handleChange() {
   emit('update:itemIcon', itemIconInfo.value || null)
 }
 
-function handleResetBackgroundColor() {
-  itemIconInfo.value.backgroundColor = initData.backgroundColor
+// 从图库选择图片
+function handleGallerySelect(src: string) {
+  itemIconInfo.value.src = src
   handleChange()
 }
 
@@ -117,7 +111,7 @@ const handleUploadFinish = ({
       <div class="flex">
         <div>
           <div class="border rounded-2xl bg-slate-200 overflow-hidden rounded-2xl transparent-grid">
-            <ItemIcon :item-icon="itemIconInfo" />
+            <ItemIcon :item-icon="itemIconInfo" :force-background="props.cardBackground" />
           </div>
         </div>
         <!-- 文字 -->
@@ -140,51 +134,38 @@ const handleUploadFinish = ({
           <!-- 图片 -->
           <div v-if="itemIconInfo.itemType === 2">
             <NInput v-model:value="itemIconInfo.src" class="mb-[5px] w-full" size="small" type="text" :placeholder="$t('iconItem.inputIconUrlOrUpload')" @input="handleChange" />
-            <NUpload
-              action="/api/file/uploadImg"
-              :show-file-list="false"
-              name="imgfile"
-              :headers="{
-                token: authStore.token as string,
-              }"
-              @finish="handleUploadFinish"
-            >
-              <NButton size="small">
-                {{ $t('iconItem.selectUpload') }}
+            <NSpace :size="8">
+              <NButton size="small" type="primary" @click="showGallery = true">
+                {{ $t('iconItem.gallery') }}
               </NButton>
-            </NUpload>
+              <NUpload
+                action="/api/file/uploadImg"
+                :show-file-list="false"
+                name="imgfile"
+                :data="{ category: 'icon' }"
+                :headers="{
+                  token: authStore.token as string,
+                }"
+                @finish="handleUploadFinish"
+              >
+                <NButton size="small">
+                  {{ $t('iconItem.selectUpload') }}
+                </NButton>
+              </NUpload>
+            </NSpace>
           </div>
         </div>
       </div>
-
-      <div class="flex items-center mt-[10px]">
-        <div class="w-auto text-slate-500 mr-[10px]">
-          {{ $t('common.backgroundColor') }}
-        </div>
-        <div class="w-[150px] flex items-center mr-[10px]">
-          <NColorPicker
-            v-model:value="itemIconInfo.backgroundColor"
-            size="small"
-            :modes="['hex']"
-            :swatches="defautSwatchesBackground"
-            @complete="handleChange"
-            @update-value="handleChange"
-          />
-        </div>
-        <div v-if="itemIconInfo.backgroundColor !== initData.backgroundColor" class="w-auto text-slate-500 mr-[10px] cursor-pointer">
-          <NButton quaternary type="info" @click="handleResetBackgroundColor">
-            {{ $t('common.reset') }}
-          </NButton>
-        </div>
-      </div>
     </div>
+
+    <GallerySelector v-model:show="showGallery" default-type="icon" @select="handleGallerySelect" />
   </div>
 </template>
 
 <style scoped>
 .transparent-grid {
-    background-image: linear-gradient(45deg, #fff 25%, transparent 25%, transparent 75%, #fff 75%),
-                      linear-gradient(45deg, #fff 25%, transparent 25%, transparent 75%, #fff 75%);
+    background-image: linear-gradient(45deg, #e6e4e4 25%, transparent 25%, transparent 75%, #e6e4e4 75%),
+                      linear-gradient(45deg, #e6e4e4 25%, transparent 25%, transparent 75%, #e6e4e4 75%);
     background-size: 16px 16px;
     background-position: 0 0, 8px 8px;
 }

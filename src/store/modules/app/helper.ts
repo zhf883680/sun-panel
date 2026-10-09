@@ -6,10 +6,29 @@ export type Theme = 'light' | 'dark' | 'auto'
 
 export type Language = 'zh-CN' | 'en-US'
 
+export interface SiteSetting {
+  title: string
+  favicoUrl: string
+  loginBackgroundUrl: string
+  isEnableLoginCaptcha: boolean
+  isDisableItemCardCache: boolean
+}
+
+export function defaultSiteSetting(): SiteSetting {
+  return {
+    title: 'Sun-Panel',
+    favicoUrl: '',
+    loginBackgroundUrl: '',
+    isEnableLoginCaptcha: false,
+    isDisableItemCardCache: false,
+  }
+}
+
 export interface AppState {
   siderCollapsed: boolean
   theme: Theme
   language: Language
+  siteSetting: SiteSetting
 }
 
 export function defaultSetting(): AppState {
@@ -18,7 +37,7 @@ export function defaultSetting(): AppState {
   if (lan.includes('zh'))
     language = 'zh-CN'
 
-  return { siderCollapsed: false, theme: 'auto', language }
+  return { siderCollapsed: false, theme: 'auto', language, siteSetting: defaultSiteSetting() }
 }
 
 export function getLocalSetting(): AppState {
