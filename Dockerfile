@@ -1,5 +1,7 @@
 # build frontend
-FROM node AS web_image
+# 前端产物与平台无关，固定在构建机平台执行（避免 QEMU 慢速构建；
+# 另外 node:latest 已不再提供 linux/arm/v7，用 node:20-alpine 兼容 32 位 ARM）
+FROM --platform=$BUILDPLATFORM node:20-alpine AS web_image
 
 # 华为源
 # RUN npm config set registry https://repo.huaweicloud.com/repository/npm/
