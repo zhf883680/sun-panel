@@ -11,16 +11,49 @@ export interface HdIconsIndex {
   name: string
   totalCount: number
   updateAt: string
+  syncing?: boolean
 }
 
-// 获取 HD-Icons 图标索引（后端代理 + 缓存）
+export interface HdIconsListParams {
+  page?: number
+  pageSize?: number
+  keyword?: string
+  style?: string
+}
+
+export interface HdIconsListData {
+  list: HdIconItem[]
+  total: number
+  page: number
+  pageSize: number
+  syncing: boolean
+  syncedAt: string
+  updateAt: string
+  totalCount: number
+}
+
+// 获取 HD-Icons 图标索引（兼容旧接口，返回全量列表）
 export function getHdIconsIndex<T>() {
   return get<T>({
     url: '/system/gallery/hdicons/index',
   })
 }
 
-// HD-Icons 图标地址（走后端代理，解决跨域）
+// 分页 + 搜索 + 风格筛选（服务端本地数据，无需回源 GitHub）
+export function getHdIconsList<T>(params: HdIconsListParams) {
+  return get<T>({
+    url: '/system/gallery/hdicons/list',
+    data: params,
+  })
+}
+
+// HD-Icons 图标地址（本地缓存位于 source_path/hdicon，
+// 由 /uploads 静态路由直接提供，支持浏览器缓存/断点协商）
 export function getHdIconsImageUrl(style: string, file: string) {
+  return `/uploads/hdicon/${encodeURIComponent(style)}/${encodeURIComponent(file)}`
+}
+
+// 图标代理地址（后端回源兜底，静态文件缺失时可手动改用）
+export function getHdIconsImageProxyUrl(style: string, file: string) {
   return `/api/system/gallery/hdicons/image?style=${encodeURIComponent(style)}&file=${encodeURIComponent(file)}`
 }

@@ -1,271 +1,145 @@
 package system
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
-	"net/url"
-	"os"
-	"path"
-	"path/filepath"
-	"regexp"
+	"strconv"
 	"strings"
-	"time"
 
 	"sun-panel/api/api_v1/common/apiReturn"
 	"sun-panel/global"
-	"sun-panel/lib/cache"
+	"sun-panel/lib/gallery"
 
 	"github.com/gin-gonic/gin"
 )
 
 type GalleryApi struct{}
 
-// HD-Icons 图库信息
-const (
-	hdIconsIndexUrl    = "https://raw.githubusercontent.com/xushier/HD-Icons/main/icons.json"
-	hdIconsIndexUrlAlt = "https://raw.githubusercontent.com/xushier/HD-Icons/master/icons.json"
-	hdIconsRawBase     = "https://raw.githubusercontent.com/xushier/HD-Icons/main/"
-	hdIconsRawBaseAlt  = "https://raw.githubusercontent.com/xushier/HD-Icons/master/"
-)
-
-// 支持的图标风格目录
-var hdIconsStyles = []string{"svg", "circle", "border-radius"}
-
-// 索引缓存（1小时）
-var hdIconsIndexCache = cache.NewGoCache[hdIconsIndexResp](time.Hour, 10*time.Minute)
-
-// 文件名安全校验，防止路径穿越
-var hdIconsFileRegexp = regexp.MustCompile(`^[A-Za-z0-9_\-]+\.(png|svg|jpg|jpeg|webp|gif|ico)$`)
-
-// 在线图库本地磁盘缓存目录：source_temp_path/gallery/hdicons
-// （docker 部署时 runtime 目录是挂载卷，缓存可跨重启保留）
-func hdIconsCacheDir() string {
-	p := global.Config.GetValueString("base", "source_temp_path")
-	if p == "" {
-		p = "./runtime/temp"
-	}
-	return filepath.Join(p, "gallery", "hdicons")
-}
-
-func hdIconsImageCacheFile(style, file string) string {
-	return filepath.Join(hdIconsCacheDir(), style, file)
-}
-
-func hdIconsIndexCacheFile() string {
-	return filepath.Join(hdIconsCacheDir(), "icons.json")
-}
-
-// 按扩展名推断 Content-Type
-func contentTypeByFileName(file string) string {
-	switch strings.ToLower(path.Ext(file)) {
-	case ".svg":
-		return "image/svg+xml"
-	case ".png":
-		return "image/png"
-	case ".jpg", ".jpeg":
-		return "image/jpeg"
-	case ".webp":
-		return "image/webp"
-	case ".gif":
-		return "image/gif"
-	case ".ico":
-		return "image/x-icon"
-	}
-	return "application/octet-stream"
-}
-
-// 写入本地缓存（失败不影响主流程）
-func writeCacheFile(filePath string, data []byte) {
-	if err := os.MkdirAll(filepath.Dir(filePath), os.ModePerm); err != nil {
+// HdIconsIndex 返回完整索引（兼容旧接口）。
+// 数据来自本地清单，未同步完成时回源一次，避免首次启动空列表。
+func (a *GalleryApi) HdIconsIndex(c *gin.Context) {
+	m := gallery.LoadManifest()
+	if m == nil {
+		// 首次启动同步尚未完成：触发后台同步并返回空列表，前端稍后重试
+		gallery.TriggerSync()
+		apiReturn.SuccessData(c, gin.H{
+			"name":       "",
+			"updateAt":   "",
+			"syncedAt":   nil,
+			"totalCount": 0,
+			"list":       []gallery.Item{},
+			"syncing":    true,
+		})
 		return
 	}
-	tmp := filePath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0666); err != nil {
+	apiReturn.SuccessData(c, gin.H{
+		"name":       m.Name,
+		"updateAt":   m.UpdateAt,
+		"syncedAt":   m.SyncedAt,
+		"totalCount": m.TotalCount,
+		"list":       m.List,
+	})
+}
+
+// HdIconsList 本地分页 + 搜索 + 风格筛选，前端滚动加载更多。
+// GET /system/gallery/hdicons/list?page=1&pageSize=60&keyword=&style=
+func (a *GalleryApi) HdIconsList(c *gin.Context) {
+	page := parsePositiveInt(c.Query("page"), 1)
+	pageSize := parsePositiveInt(c.Query("pageSize"), 60)
+	if pageSize > 200 {
+		pageSize = 200
+	}
+	keyword := strings.ToLower(strings.TrimSpace(c.Query("keyword")))
+	style := strings.TrimSpace(c.Query("style"))
+
+	m := gallery.LoadManifest()
+	status := gallery.GetStatus()
+	if m == nil {
+		// 首次启动尚未完成同步，返回空列表并标记 syncing，前端据此提示与重试
+		apiReturn.SuccessData(c, gin.H{
+			"list":       []gallery.Item{},
+			"total":      0,
+			"page":       page,
+			"pageSize":   pageSize,
+			"syncing":    status.Syncing,
+			"syncedAt":   status.SyncedAt,
+			"updateAt":   status.UpdateAt,
+			"totalCount": 0,
+		})
 		return
 	}
-	_ = os.Rename(tmp, filePath)
-}
 
-type hdIconRawItem struct {
-	Name string `json:"name"`
-	Url  string `json:"url"`
-}
-
-type hdIconsRawIndex struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	TotalCount  int             `json:"total_count"`
-	UpdateAt    string          `json:"update_at"`
-	Icons       []hdIconRawItem `json:"icons"`
-}
-
-type hdIconItem struct {
-	Name  string `json:"name"`
-	Style string `json:"style"`
-	File  string `json:"file"`
-	Url   string `json:"url"`
-}
-
-type hdIconsIndexResp struct {
-	List       []hdIconItem `json:"list"`
-	Name       string       `json:"name"`
-	TotalCount int          `json:"totalCount"`
-	UpdateAt   string       `json:"updateAt"`
-}
-
-func isSupportedHdIconsStyle(style string) bool {
-	for _, v := range hdIconsStyles {
-		if v == style {
-			return true
-		}
-	}
-	return false
-}
-
-// 拉取HD-Icons索引
-func fetchHdIconsIndex() (hdIconsIndexResp, error) {
-	resp := hdIconsIndexResp{List: []hdIconItem{}, TotalCount: 0}
-
-	var body []byte
-	var err error
-	client := &http.Client{Timeout: 30 * time.Second}
-	for _, u := range []string{hdIconsIndexUrl, hdIconsIndexUrlAlt} {
-		var r *http.Response
-		r, err = client.Get(u)
-		if err != nil {
+	filtered := make([]gallery.Item, 0, len(m.List))
+	for _, item := range m.List {
+		if style != "" && style != "all" && item.Style != style {
 			continue
 		}
-		func() {
-			defer r.Body.Close()
-			if r.StatusCode != http.StatusOK {
-				err = fmt.Errorf("HTTP request failed, status code: %d", r.StatusCode)
-				return
-			}
-			body, err = io.ReadAll(r.Body)
-		}()
-		if err == nil && len(body) > 0 {
-			break
+		if keyword != "" && !strings.Contains(strings.ToLower(item.Name), keyword) {
+			continue
 		}
-	}
-	if err != nil {
-		return resp, err
-	}
-	if len(body) == 0 {
-		return resp, fmt.Errorf("empty index data")
+		filtered = append(filtered, item)
 	}
 
-	raw := hdIconsRawIndex{}
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return resp, err
+	total := len(filtered)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
 	}
-	resp.Name = raw.Name
-	resp.UpdateAt = raw.UpdateAt
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
 
-	for _, v := range raw.Icons {
-		item := hdIconItem{Name: v.Name, Url: v.Url}
-		if u, err := url.Parse(v.Url); err == nil {
-			item.File = path.Base(u.Path)
-			item.Style = path.Base(path.Dir(u.Path))
-		}
-		if item.File == "" {
-			item.File = v.Name + ".png"
-		}
-		if !isSupportedHdIconsStyle(item.Style) {
-			item.Style = "border-radius"
-		}
-		resp.List = append(resp.List, item)
-	}
-	resp.TotalCount = len(resp.List)
-	return resp, nil
+	apiReturn.SuccessData(c, gin.H{
+		"list":       filtered[start:end],
+		"total":      total,
+		"page":       page,
+		"pageSize":   pageSize,
+		"syncing":    status.Syncing,
+		"syncedAt":   status.SyncedAt,
+		"updateAt":   m.UpdateAt,
+		"totalCount": m.TotalCount,
+	})
 }
 
-// 获取HD-Icons索引（带缓存）
-func (a *GalleryApi) HdIconsIndex(c *gin.Context) {
-	if v, ok := hdIconsIndexCache.Get("index"); ok {
-		apiReturn.SuccessData(c, v)
-		return
-	}
-
-	resp, err := fetchHdIconsIndex()
-	if err != nil {
-		global.Logger.Error("[gallery] fetch hdicons index error:", err.Error())
-		// 回源失败时使用本地磁盘缓存
-		if b, e := os.ReadFile(hdIconsIndexCacheFile()); e == nil && len(b) > 0 {
-			cached := hdIconsIndexResp{}
-			if e := json.Unmarshal(b, &cached); e == nil {
-				global.Logger.Info("[gallery] use local cached hdicons index")
-				hdIconsIndexCache.Set("index", cached, time.Hour)
-				apiReturn.SuccessData(c, cached)
-				return
-			}
-		}
-		apiReturn.Error(c, "Failed to fetch the online gallery index: "+err.Error())
-		return
-	}
-
-	hdIconsIndexCache.Set("index", resp, time.Hour)
-	if b, e := json.Marshal(resp); e == nil {
-		writeCacheFile(hdIconsIndexCacheFile(), b)
-	}
-	apiReturn.SuccessData(c, resp)
+// HdIconsSyncStatus 查询当前同步状态（不触发同步）
+func (a *GalleryApi) HdIconsSyncStatus(c *gin.Context) {
+	apiReturn.SuccessData(c, gallery.GetStatus())
 }
 
-// 代理HD-Icons图片，解决跨域/速度问题
+// HdIconsSync 手动触发一次同步（后台执行，立即返回）
+func (a *GalleryApi) HdIconsSync(c *gin.Context) {
+	started := gallery.TriggerSync()
+	apiReturn.SuccessData(c, gin.H{"started": started})
+}
+
+// HdIconsImage 提供本地图片，未缓存时回源一次并落盘
 func (a *GalleryApi) HdIconsImage(c *gin.Context) {
 	style := c.Query("style")
 	file := c.Query("file")
 
-	if !isSupportedHdIconsStyle(style) || !hdIconsFileRegexp.MatchString(file) {
+	if !gallery.IsSupportedStyle(style) || !gallery.IsValidFile(file) {
 		c.Status(http.StatusBadRequest)
 		return
 	}
 
-	// 命中本地磁盘缓存直接返回
-	cacheFile := hdIconsImageCacheFile(style, file)
-	if b, err := os.ReadFile(cacheFile); err == nil && len(b) > 0 {
-		c.Header("Cache-Control", "public, max-age=86400")
-		c.Data(http.StatusOK, contentTypeByFileName(file), b)
-		return
-	}
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	var resp *http.Response
-	var err error
-	for _, base := range []string{hdIconsRawBase, hdIconsRawBaseAlt} {
-		resp, err = client.Get(base + style + "/" + file)
-		if err != nil {
-			continue
-		}
-		if resp.StatusCode == http.StatusOK {
-			break
-		}
-		resp.Body.Close()
-		err = fmt.Errorf("HTTP request failed, status code: %d", resp.StatusCode)
-	}
-	if err != nil || resp == nil {
-		global.Logger.Error("[gallery] fetch hdicons image error:", err)
+	body, err := gallery.EnsureImage(style, file)
+	if err != nil {
+		global.Logger.Error("[gallery] hdicons image error: ", err.Error())
 		c.Status(http.StatusNotFound)
 		return
 	}
-	defer resp.Body.Close()
-
-	contentType := resp.Header.Get("Content-Type")
-	if contentType == "" || strings.HasPrefix(contentType, "text/") {
-		contentType = contentTypeByFileName(file)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil || len(body) == 0 {
-		global.Logger.Error("[gallery] read hdicons image error:", err)
-		c.Status(http.StatusNotFound)
-		return
-	}
-
-	// 落盘缓存，下次直接走本地（离线也能用）
-	writeCacheFile(cacheFile, body)
 
 	c.Header("Cache-Control", "public, max-age=86400")
-	c.Data(http.StatusOK, contentType, body)
+	c.Data(http.StatusOK, gallery.ContentTypeByFileName(file), body)
+}
+
+func parsePositiveInt(raw string, fallback int) int {
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return fallback
+	}
+	return v
 }

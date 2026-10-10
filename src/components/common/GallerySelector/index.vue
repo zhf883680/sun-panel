@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { NButton, NEmpty, NGrid, NGridItem, NImage, NInput, NSelect, NSpin, NUpload, useMessage } from 'naive-ui'
-import { getHdIconsIndex, getHdIconsImageUrl } from '@/api/system/gallery'
-import type { HdIconItem, HdIconsIndex } from '@/api/system/gallery'
+import { getHdIconsImageUrl, getHdIconsList } from '@/api/system/gallery'
+import type { HdIconItem, HdIconsListData } from '@/api/system/gallery'
 import { getList as getFileList } from '@/api/system/file'
 import { useAuthStore } from '@/store'
 import { t } from '@/locales'
@@ -23,7 +23,7 @@ const emit = defineEmits<{
 const ms = useMessage()
 const authStore = useAuthStore()
 
-// 分页加载数量
+// 分页加载数量（本地与在线共用滚动加载）
 const PAGE_SIZE = 60
 
 const tab = ref<'local' | 'online'>('local')
@@ -31,19 +31,24 @@ const fileType = ref<string>(props.defaultType)
 const keyword = ref('')
 const localList = ref<File.Info[]>([])
 const localLoading = ref(false)
+const page = ref(1)
+
+// 在线图库：数据来自后端本地缓存，服务端分页 + 搜索
 const onlineList = ref<HdIconItem[]>([])
 const onlineLoading = ref(false)
-const onlineLoaded = ref(false)
-const onlineStyle = ref('border-radius')
-const page = ref(1)
+const onlineSyncing = ref(false)
+const onlineTotal = ref(0)
+const onlinePage = ref(0)
+const onlineStyle = ref('all')
 
 const typeOptions = computed(() => [
   { label: t('gallery.typeIcon'), value: 'icon' },
   { label: t('gallery.typeWallpaper'), value: 'wallpaper' },
 ])
 
-// 与 v1.8.1 保持一致：该下拉仅作展示，图标使用自身风格地址
+// 在线图库风格筛选（服务端过滤）
 const styleOptions = [
+  { label: t('gallery.styleAll'), value: 'all' },
   { label: t('gallery.styleBorderRadius'), value: 'border-radius' },
   { label: t('gallery.styleCircle'), value: 'circle' },
   { label: t('gallery.styleSvg'), value: 'svg' },
@@ -56,18 +61,12 @@ const filterLocalList = computed(() => {
   return localList.value.filter(item => item.fileName?.toLowerCase().includes(key))
 })
 
-const filterOnlineList = computed(() => {
-  const key = keyword.value.trim().toLowerCase()
-  if (!key)
-    return onlineList.value
-  return onlineList.value.filter(item => item.name.toLowerCase().includes(key))
-})
-
-// 分页（滚动加载更多）
+// 本地分页（滚动加载更多）
 const showLocalList = computed(() => filterLocalList.value.slice(0, page.value * PAGE_SIZE))
 const localHasMore = computed(() => showLocalList.value.length < filterLocalList.value.length)
-const showOnlineList = computed(() => filterOnlineList.value.slice(0, page.value * PAGE_SIZE))
-const hasMore = computed(() => showOnlineList.value.length < filterOnlineList.value.length)
+
+// 在线分页（服务端已分页，直接展示）
+const onlineHasMore = computed(() => onlineList.value.length < onlineTotal.value)
 
 watch(() => props.show, (show) => {
   if (show) {
@@ -76,14 +75,16 @@ watch(() => props.show, (show) => {
     page.value = 1
     if (tab.value === 'local')
       getLocalList()
+    else
+      loadOnlinePage(true)
   }
 })
 
 watch(tab, (value) => {
   if (value === 'local')
     getLocalList()
-  else if (!onlineLoaded.value)
-    getOnlineList()
+  else
+    loadOnlinePage(true)
 })
 
 watch(fileType, () => {
@@ -91,9 +92,35 @@ watch(fileType, () => {
     getLocalList()
 })
 
+watch(onlineStyle, () => {
+  if (tab.value === 'online')
+    loadOnlinePage(true)
+})
+
 watch(keyword, () => {
   page.value = 1
+  if (tab.value === 'online')
+    scheduleOnlineSearch()
 })
+
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+let retryTimer: ReturnType<typeof setTimeout> | undefined
+
+function scheduleOnlineSearch() {
+  if (searchTimer)
+    clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => loadOnlinePage(true), 300)
+}
+
+// 首次同步尚未完成时轮询重试，同步完成后自动展示
+function scheduleOnlineRetry() {
+  if (retryTimer)
+    clearTimeout(retryTimer)
+  retryTimer = setTimeout(() => {
+    if (tab.value === 'online')
+      loadOnlinePage(true)
+  }, 3000)
+}
 
 async function getLocalList() {
   localLoading.value = true
@@ -107,13 +134,36 @@ async function getLocalList() {
   localLoading.value = false
 }
 
-async function getOnlineList() {
+async function loadOnlinePage(reset = false) {
+  if (onlineLoading.value)
+    return
+  if (reset) {
+    onlinePage.value = 0
+    onlineTotal.value = 0
+    onlineList.value = []
+  }
+  else if (onlineTotal.value > 0 && onlineList.value.length >= onlineTotal.value) {
+    return
+  }
+
   onlineLoading.value = true
   try {
-    const { code, data } = await getHdIconsIndex<HdIconsIndex>()
-    if (code === 0 && data?.list) {
-      onlineList.value = data.list
-      onlineLoaded.value = true
+    const nextPage = onlinePage.value + 1
+    const { code, data } = await getHdIconsList<HdIconsListData>({
+      page: nextPage,
+      pageSize: PAGE_SIZE,
+      keyword: keyword.value.trim(),
+      style: onlineStyle.value,
+    })
+    if (code === 0 && data) {
+      onlineSyncing.value = !!data.syncing
+      onlineTotal.value = data.total || 0
+      onlinePage.value = nextPage
+      const items = data.list || []
+      onlineList.value = reset ? items : onlineList.value.concat(items)
+      // 同步中且暂无数据：稍后自动重试
+      if (onlineSyncing.value && onlineTotal.value === 0)
+        scheduleOnlineRetry()
     }
     else {
       ms.error(t('gallery.onlineLoadFailed'))
@@ -130,8 +180,13 @@ function handleScroll(e: Event) {
   const target = e.target as HTMLElement
   if (target.scrollTop + target.clientHeight < target.scrollHeight - 40)
     return
-  if (tab.value === 'local' ? localHasMore.value : hasMore.value)
-    page.value++
+  if (tab.value === 'local') {
+    if (localHasMore.value)
+      page.value++
+  }
+  else if (onlineHasMore.value) {
+    loadOnlinePage(false)
+  }
 }
 
 // 选择本地图库图片
@@ -221,9 +276,12 @@ function handleUploadFinish() {
 
           <!-- 在线图库 -->
           <template v-else>
-            <NEmpty v-if="showOnlineList.length === 0 && !onlineLoading" :description="$t('gallery.empty')" class="mt-[40px]" />
+            <div v-if="onlineSyncing && onlineList.length === 0" class="text-center text-xs opacity-70 py-[40px]">
+              {{ $t('gallery.onlineSyncing') }}
+            </div>
+            <NEmpty v-else-if="onlineList.length === 0 && !onlineLoading" :description="$t('gallery.empty')" class="mt-[40px]" />
             <NGrid v-else cols="4 400:5 600:6 800:8" :x-gap="8" :y-gap="8">
-              <NGridItem v-for="item in showOnlineList" :key="item.name">
+              <NGridItem v-for="item in onlineList" :key="`${item.style}/${item.file}`">
                 <div class="gallery-item" :title="item.name" @click="handleSelectOnline(item)">
                   <img :src="getHdIconsImageUrl(item.style, item.file)" loading="lazy" class="gallery-img" alt="">
                   <div class="gallery-name">
@@ -232,7 +290,7 @@ function handleUploadFinish() {
                 </div>
               </NGridItem>
             </NGrid>
-            <div v-if="hasMore" class="text-center text-xs opacity-60 py-[10px]">
+            <div v-if="onlineHasMore" class="text-center text-xs opacity-60 py-[10px]">
               {{ $t('gallery.scrollForMore') }}
             </div>
           </template>
