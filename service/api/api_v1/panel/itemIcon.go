@@ -257,14 +257,11 @@ func (a *ItemIcon) GetSiteFavicon(c *gin.Context) {
 		fullUrl = "http://" + fullUrl
 	}
 	global.Logger.Debug("fullUrl:", fullUrl)
-	// 去除图标的get参数
-	{
-		parsedIcoURL, err := url.Parse(fullUrl)
-		if err != nil {
-			apiReturn.ErrorCode(c, -1, "acquisition failed: parsed ico URL :"+err.Error(), resp)
-			return
-		}
-		fullUrl = parsedIcoURL.Scheme + "://" + parsedIcoURL.Host + parsedIcoURL.Path
+	// 解析图标地址。保留 query，部分站点（CDN）依赖 query 才会返回真实图标
+	parsedIcoURL, err := url.Parse(fullUrl)
+	if err != nil {
+		apiReturn.ErrorCode(c, -1, "acquisition failed: parsed ico URL :"+err.Error(), resp)
+		return
 	}
 	global.Logger.Debug("fullUrl:", fullUrl)
 
@@ -292,8 +289,8 @@ func (a *ItemIcon) GetSiteFavicon(c *gin.Context) {
 		fileSize = fileStat.Size()
 	}
 
-	// 保存到数据库
-	ext := path.Ext(fullUrl)
+	// 保存到数据库（扩展名取 URL path，忽略 query 参数）
+	ext := strings.ToLower(path.Ext(parsedIcoURL.Path))
 	mFile := models.File{}
 	if _, err := mFile.AddFile(userInfo.ID, parsedURL.Host, ext, imgInfo.Name(), fileSize, "icon"); err != nil {
 		apiReturn.ErrorDatabase(c, err.Error())

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sun-panel/lib/cmn"
@@ -16,6 +17,9 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 )
+
+// 浏览器默认图标地址：页面没有显式声明图标时回退到这里
+const defaultFaviconPath = "/favicon.ico"
 
 func IsHTTPURL(url string) bool {
 	httpPattern := `^(http://|https://|//)`
@@ -26,23 +30,109 @@ func IsHTTPURL(url string) bool {
 	return match
 }
 
+// 图标 rel 优先级：数值越小越优先。
+// 例如 "icon" / "shortcut icon" 优先于 "apple-touch-icon"、"mask-icon"，
+// 避免把 SPA 里常见的 apple-touch-icon 当成首选项导致下载失败。
+func iconRelPriority(rel string) int {
+	rel = strings.ToLower(strings.TrimSpace(rel))
+	switch {
+	case rel == "icon" || rel == "shortcut icon":
+		return 0
+	case strings.Contains(rel, "apple-touch-icon"):
+		return 2
+	case strings.Contains(rel, "mask-icon"):
+		return 3
+	case strings.Contains(rel, "icon"):
+		return 1
+	default:
+		return 99
+	}
+}
+
+// 以页面地址（并考虑 <base href>）为基准，把 href 解析成绝对地址
+func resolveIconURL(base *url.URL, href string) string {
+	href = strings.TrimSpace(href)
+	if base == nil || href == "" {
+		return href
+	}
+	if strings.HasPrefix(href, "//") {
+		if base.Scheme == "" {
+			return href
+		}
+		return base.Scheme + ":" + href
+	}
+	ref, err := url.Parse(href)
+	if err != nil {
+		return href
+	}
+	return base.ResolveReference(ref).String()
+}
+
+// 计算文档的基准地址（支持 <base href>）
+func documentBaseURL(pageURL string, doc *goquery.Document) *url.URL {
+	base, err := url.Parse(pageURL)
+	if err != nil {
+		return nil
+	}
+	if doc != nil {
+		if href, ok := doc.Find("base[href]").First().Attr("href"); ok {
+			if ref, err := url.Parse(strings.TrimSpace(href)); err == nil {
+				base = base.ResolveReference(ref)
+			}
+		}
+	}
+	return base
+}
+
+// 收集页面声明的图标地址，并按优先级排序
+func collectIconLinks(doc *goquery.Document, base *url.URL) []string {
+	type iconLink struct {
+		href string
+		rank int
+	}
+
+	links := make([]iconLink, 0)
+	if doc != nil {
+		doc.Find("link").Each(func(i int, s *goquery.Selection) {
+			rel, _ := s.Attr("rel")
+			href, _ := s.Attr("href")
+			href = strings.TrimSpace(href)
+			if href == "" {
+				return
+			}
+			rank := iconRelPriority(rel)
+			if rank >= 99 {
+				return
+			}
+			links = append(links, iconLink{href: href, rank: rank})
+		})
+	}
+	sort.SliceStable(links, func(i, j int) bool { return links[i].rank < links[j].rank })
+
+	icons := make([]string, 0, len(links))
+	for _, l := range links {
+		icons = append(icons, resolveIconURL(base, l.href))
+	}
+	return icons
+}
+
+// 页面未声明图标时的兜底地址：站点根目录下的 /favicon.ico
+func defaultFaviconURL(base *url.URL) string {
+	if base == nil || base.Host == "" {
+		return ""
+	}
+	return base.ResolveReference(&url.URL{Path: defaultFaviconPath}).String()
+}
+
 func GetOneFaviconURL(urlStr string) (string, error) {
 	iconURLs, err := getFaviconURL(urlStr)
 	if err != nil {
 		return "", err
 	}
-
-	for _, v := range iconURLs {
-		// 标准的路径地址
-		if IsHTTPURL(v) {
-			return v, nil
-		} else {
-			urlInfo, _ := url.Parse(urlStr)
-			fullUrl := urlInfo.Scheme + "://" + urlInfo.Host + "/" + strings.TrimPrefix(v, "/")
-			return fullUrl, nil
-		}
+	if len(iconURLs) == 0 {
+		return "", fmt.Errorf("not found ico")
 	}
-	return "", fmt.Errorf("not found ico")
+	return iconURLs[0], nil
 }
 
 // 从网页上的link标签中获取图标的完整地址，同时返回网页标题
@@ -55,31 +145,17 @@ func GetOneFaviconURLAndTitle(urlStr string) (iconUrl string, title string, err 
 
 	title = strings.TrimSpace(doc.Find("title").First().Text())
 
-	iconURLs := []string{}
-	doc.Find("link").Each(func(i int, s *goquery.Selection) {
-		rel, _ := s.Attr("rel")
-		href, _ := s.Attr("href")
-
-		if strings.Contains(strings.ToLower(rel), "icon") && href != "" {
-			iconURLs = append(iconURLs, href)
-		}
-	})
-
+	base := documentBaseURL(urlStr, doc)
+	iconURLs := collectIconLinks(doc, base)
 	if len(iconURLs) == 0 {
+		// 页面没有显式声明图标时，回退到浏览器默认的 /favicon.ico
+		if fallback := defaultFaviconURL(base); fallback != "" {
+			return fallback, title, nil
+		}
 		return "", title, errors.New("favicon not found on the page")
 	}
 
-	for _, v := range iconURLs {
-		// 标准的路径地址
-		if IsHTTPURL(v) {
-			return v, title, nil
-		} else {
-			urlInfo, _ := url.Parse(urlStr)
-			fullUrl := urlInfo.Scheme + "://" + urlInfo.Host + "/" + strings.TrimPrefix(v, "/")
-			return fullUrl, title, nil
-		}
-	}
-	return "", title, fmt.Errorf("not found ico")
+	return iconURLs[0], title, nil
 }
 
 // 获取远程文件的大小
@@ -101,20 +177,14 @@ func GetRemoteFileSize(url string) (int64, error) {
 }
 
 // 下载图片
-func DownloadImage(url, savePath string, maxSize int64) (*os.File, error) {
-	// 获取远程文件大小
-	fileSize, err := GetRemoteFileSize(url)
-	if err != nil {
-		return nil, err
-	}
-
-	// 判断文件大小是否在阈值内
-	if fileSize > maxSize {
+func DownloadImage(imgURL, savePath string, maxSize int64) (*os.File, error) {
+	// 获取远程文件大小。部分服务器不支持 HEAD，这里不作为失败条件，仅用于大小限制。
+	if fileSize, err := GetRemoteFileSize(imgURL); err == nil && fileSize > maxSize {
 		return nil, fmt.Errorf("文件太大，不下载。大小：%d字节", fileSize)
 	}
 
 	// 发送HTTP GET请求获取图片数据
-	response, err := http.Get(url)
+	response, err := http.Get(imgURL)
 	if err != nil {
 		return nil, err
 	}
@@ -125,11 +195,17 @@ func DownloadImage(url, savePath string, maxSize int64) (*os.File, error) {
 		return nil, fmt.Errorf("HTTP request failed, status code: %d", response.StatusCode)
 	}
 
-	urlFileName := path.Base(url)
-	fileExt := path.Ext(url)
+	// 从 URL 的 path 部分推断文件名与扩展名，避免把 query 参数当成扩展名
+	urlPath := imgURL
+	if u, perr := url.Parse(imgURL); perr == nil {
+		urlPath = u.Path
+	}
+	urlFileName := path.Base(urlPath)
+	fileExt := strings.ToLower(path.Ext(urlPath))
 	fileName := cmn.Md5(fmt.Sprintf("%s%s", urlFileName, time.Now().String())) + fileExt
 
-	destination := savePath + "/" + fileName
+	// 使用单斜杠拼接，避免出现 "//" 导致静态路由重定向
+	destination := strings.TrimRight(savePath, "/") + "/" + fileName
 
 	// 创建本地文件用于保存图片
 	file, err := os.Create(destination)
@@ -139,52 +215,33 @@ func DownloadImage(url, savePath string, maxSize int64) (*os.File, error) {
 	defer file.Close()
 
 	// 将图片数据写入本地文件
-	_, err = io.Copy(file, response.Body)
-	if err != nil {
+	if _, err = io.Copy(file, response.Body); err != nil {
 		return nil, err
 	}
 	return file, nil
 }
 
 func GetOneFaviconURLAndUpload(urlStr string) (string, bool) {
-	//www.iqiyipic.com/pcwimg/128-128-logo.png
 	iconURLs, err := getFaviconURL(urlStr)
-	if err != nil {
+	if err != nil || len(iconURLs) == 0 {
 		return "", false
 	}
-
-	for _, v := range iconURLs {
-		// 标准的路径地址
-		if IsHTTPURL(v) {
-			return v, true
-		} else {
-			urlInfo, _ := url.Parse(urlStr)
-			fullUrl := urlInfo.Scheme + "://" + urlInfo.Host + "/" + strings.TrimPrefix(v, "/")
-			return fullUrl, true
-		}
-	}
-	return "", false
+	return iconURLs[0], true
 }
 
-func getFaviconURL(url string) ([]string, error) {
-	icons := make([]string, 0)
-	doc, err := getDocument(url)
+func getFaviconURL(urlStr string) ([]string, error) {
+	doc, err := getDocument(urlStr)
 	if err != nil {
-		return icons, err
+		return nil, err
 	}
 
-	// 查找所有link标签，筛选包含rel属性为"icon"的标签
-	doc.Find("link").Each(func(i int, s *goquery.Selection) {
-		rel, _ := s.Attr("rel")
-		href, _ := s.Attr("href")
-
-		if strings.Contains(rel, "icon") && href != "" {
-			// fmt.Println(href)
-			icons = append(icons, href)
-		}
-	})
-
+	base := documentBaseURL(urlStr, doc)
+	icons := collectIconLinks(doc, base)
 	if len(icons) == 0 {
+		// 没有显式声明图标时，回退到 /favicon.ico
+		if fallback := defaultFaviconURL(base); fallback != "" {
+			return []string{fallback}, nil
+		}
 		return icons, errors.New("favicon not found on the page")
 	}
 
@@ -193,7 +250,7 @@ func getFaviconURL(url string) ([]string, error) {
 
 // 请求页面并解析为 goquery 文档
 func getDocument(url string) (*goquery.Document, error) {
-	client := &http.Client{}
+	client := &http.Client{Timeout: 15 * time.Second}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
