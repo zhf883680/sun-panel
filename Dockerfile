@@ -16,7 +16,7 @@ RUN npm ci
 COPY . /build
 
 # 前端展示用版本号（与后端 service/assets/version 保持一致）
-ARG VITE_APP_VERSION=1.9.0
+ARG VITE_APP_VERSION=1.9.1
 ENV VITE_APP_VERSION=${VITE_APP_VERSION}
 
 RUN npm run build

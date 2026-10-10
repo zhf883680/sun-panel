@@ -3,7 +3,7 @@ version: "3.2"
 services:
   sun-panel:
     build: .
-    image: zhf883680/sun-panel:1.9.0
+    image: zhf883680/sun-panel:1.9.1
     container_name: sun-panel
     volumes:
     - ./conf:/app/conf
